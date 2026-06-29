@@ -74,9 +74,72 @@ async def go_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data.clear()
     await query.edit_message_text("↩️ عملیات لغو شد.")
-    await query.message.reply_text(
-        "🏠 منوی اصلی:", reply_markup=main_keyboard()
+    await query.message.reply_text("🏠 منوی اصلی:", reply_markup=main_keyboard())
+    return MAIN_MENU
+
+async def pay_pending_from_wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """وقتی کاربر بعد از شارژ کیف پول، سفارش معلقش رو از کیف پول پرداخت می‌کنه"""
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    db = load_db()
+    user = get_user(db, uid)
+    pending_order = context.user_data.get("pending_order")
+
+    if not pending_order:
+        await query.edit_message_text("❌ سفارش معلقی پیدا نشد.")
+        return MAIN_MENU
+
+    total = pending_order["total"]
+    gb = pending_order["gb"]
+    days = pending_order["days"]
+
+    if user["balance"] < total:
+        need = total - user["balance"]
+        await query.answer(
+            f"❌ موجودی هنوز کافی نیست.\nکمبود: {need:,} تومان\nمنتظر تأیید ادمین باشید.",
+            show_alert=True
+        )
+        return MAIN_MENU
+
+    # پرداخت از کیف پول
+    user["balance"] -= total
+    order_id = len(db["orders"]) + 1
+    order = {
+        "id": order_id, "user_id": str(uid),
+        "gb": gb, "days": days, "total": total,
+        "status": "pending_activation",
+        "payment": "wallet",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    db["orders"].append(order)
+    user["orders"].append(order_id)
+    save_db(db)
+    context.user_data.pop("pending_order", None)
+
+    await query.edit_message_text(
+        f"✅ *پرداخت از کیف پول موفق!*\n\n"
+        f"🆔 شماره سفارش: `#{order_id}`\n"
+        f"📦 {gb} گیگابایت | {days} روز\n"
+        f"💰 {total:,} تومان از کیف پول کسر شد\n"
+        f"💵 موجودی باقی‌مانده: {user['balance']:,} تومان\n\n"
+        f"⏳ ادمین به زودی سرویس را فعال می‌کند.",
+        parse_mode="Markdown"
     )
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id,
+                f"🛒 *سفارش جدید #{order_id}*\n"
+                f"👤 {query.from_user.first_name} | ID: `{uid}`\n"
+                f"📦 {gb} GB | {days} روز\n"
+                f"💰 {total:,} تومان (از کیف پول)\n\n"
+                f"تأیید: /approve_{order_id}",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
     return MAIN_MENU
 
 # ─── /start ───────────────────────────────────────────────────────────────────
@@ -169,6 +232,7 @@ async def buy_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )])
     
     buttons.append([InlineKeyboardButton("💳 پرداخت کارت به کارت", callback_data="pay_card")])
+    buttons.append([InlineKeyboardButton("🔋 شارژ کیف پول و پرداخت", callback_data="charge_then_pay")])
     buttons.append([InlineKeyboardButton("❌ انصراف", callback_data="go_main")])
 
     save_db(db)
@@ -187,8 +251,24 @@ async def buy_payment_method_callback(update: Update, context: ContextTypes.DEFA
     await query.answer()
 
     if query.data == "pay_wallet_insufficient":
-        await query.answer("❌ موجودی کیف پول کافی نیست. کیف پول را شارژ کنید.", show_alert=True)
+        await query.answer("❌ موجودی کافی نیست. از دکمه شارژ کیف پول استفاده کنید.", show_alert=True)
         return BUY_PAYMENT_METHOD
+
+    if query.data == "charge_then_pay":
+        # ذخیره اطلاعات سفارش برای بعد از شارژ کیف پول
+        context.user_data["pending_order"] = {
+            "gb": context.user_data["gb"],
+            "days": context.user_data["days"],
+            "total": context.user_data["total"],
+        }
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ انصراف", callback_data="go_main")]])
+        await query.edit_message_text(
+            f"🔋 *شارژ کیف پول*\n\n"
+            f"💡 بعد از شارژ، دکمه پرداخت از کیف پول نشان داده می‌شود.\n\n"
+            f"چه مبلغی می‌خواهید واریز کنید؟\n_(مثال: 50000، 100000)_ تومان",
+            parse_mode="Markdown", reply_markup=kb
+        )
+        return WALLET_AMOUNT
 
     uid = query.from_user.id
     db = load_db()
@@ -360,10 +440,32 @@ async def wallet_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     save_db(db)
 
-    await update.message.reply_text(
-        f"✅ رسید شارژ دریافت شد!\n💰 {amount:,} تومان\n⏳ پس از تأیید ادمین موجودی افزایش می‌یابد.",
-        reply_markup=main_keyboard()
-    )
+    # اگه سفارش معلقی داشت، دکمه پرداخت از کیف پول نشون بده
+    pending_order = context.user_data.get("pending_order")
+    if pending_order:
+        total = pending_order["total"]
+        gb = pending_order["gb"]
+        days = pending_order["days"]
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"💰 پرداخت سفارش از کیف پول ({total:,} تومان)",
+                callback_data="pay_pending_from_wallet"
+            )],
+            [InlineKeyboardButton("🏠 منوی اصلی", callback_data="go_main")]
+        ])
+        await update.message.reply_text(
+            f"✅ رسید شارژ دریافت شد!\n"
+            f"💰 {amount:,} تومان\n"
+            f"⏳ پس از تأیید ادمین، موجودی افزایش می‌یابد.\n\n"
+            f"📦 سفارش معلق: {gb}GB | {days}روز | {total:,} تومان\n"
+            f"وقتی کیف پولت شارژ شد دکمه پایین رو بزن:",
+            reply_markup=kb
+        )
+    else:
+        await update.message.reply_text(
+            f"✅ رسید شارژ دریافت شد!\n💰 {amount:,} تومان\n⏳ پس از تأیید ادمین موجودی افزایش می‌یابد.",
+            reply_markup=main_keyboard()
+        )
     photo_id = update.message.photo[-1].file_id
     for admin_id in ADMIN_IDS:
         try:
@@ -689,6 +791,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
                 CallbackQueryHandler(wallet_charge_callback, pattern="^wallet_charge$"),
                 CallbackQueryHandler(go_main_callback, pattern="^go_main$"),
+                CallbackQueryHandler(pay_pending_from_wallet_callback, pattern="^pay_pending_from_wallet$"),
             ],
             BUY_GB: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, buy_gb),
@@ -724,6 +827,7 @@ def main():
                 MessageHandler(filters.PHOTO, wallet_receipt),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: u.message.reply_text("📷 لطفاً تصویر رسید ارسال کنید:")),
                 CallbackQueryHandler(go_main_callback, pattern="^go_main$"),
+                CallbackQueryHandler(pay_pending_from_wallet_callback, pattern="^pay_pending_from_wallet$"),
             ],
             SUPPORT_MSG: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, support_msg),
