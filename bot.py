@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "123456789").split(",")))  # آیدی عددی ادمین‌ها
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "123456789").split(",")))
 CARD_NUMBER = os.getenv("CARD_NUMBER", "6037-XXXX-XXXX-XXXX")
 CARD_OWNER = os.getenv("CARD_OWNER", "نام صاحب کارت")
 PRICE_PER_GB = 4000  # تومان
@@ -27,7 +27,7 @@ DB_FILE = "db.json"
     MAIN_MENU, BUY_GB, BUY_DURATION, BUY_CONFIRM, BUY_RECEIPT,
     WALLET_MENU, WALLET_AMOUNT, WALLET_RECEIPT,
     SUPPORT_MSG,
-    ADMIN_MENU, ADMIN_CHARGE_USER, ADMIN_CHARGE_AMOUNT
+    ADMIN_MENU, ADMIN_CHARGE_USERID, ADMIN_CHARGE_AMOUNT
 ) = range(12)
 
 # ─── Database ─────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     name = update.effective_user.first_name or "کاربر"
     await update.message.reply_text(
-        f"🔒 به فروشگاه Bat Vpn خوش آمدید، {name} عزیز!\n\n"
+        f"🔒 به فروشگاه VPN خوش آمدید، {name} عزیز!\n\n"
         "از منوی زیر گزینه مورد نظر را انتخاب کنید:",
         reply_markup=main_keyboard()
     )
@@ -94,11 +94,9 @@ async def buy_gb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text.isdigit() or int(text) <= 0:
         await update.message.reply_text("❌ لطفاً یک عدد صحیح مثبت وارد کنید:")
         return BUY_GB
-
     context.user_data["gb"] = int(text)
     await update.message.reply_text(
-        f"⏳ مدت زمان سرویس را وارد کنید:\n"
-        f"_(بین ۳۰ تا ۹۰ روز - مثال: 30، 60، 90)_",
+        f"⏳ مدت زمان سرویس را وارد کنید:\n_(بین ۳۰ تا ۹۰ روز - مثال: 30، 60، 90)_",
         parse_mode="Markdown"
     )
     return BUY_DURATION
@@ -144,7 +142,6 @@ async def buy_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     total = context.user_data["total"]
 
     if user["balance"] >= total:
-        # پرداخت از کیف پول
         user["balance"] -= total
         order_id = len(db["orders"]) + 1
         order = {
@@ -162,34 +159,31 @@ async def buy_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🆔 شماره سفارش: `#{order_id}`\n"
             f"📦 {context.user_data['gb']} گیگابایت | {context.user_data['days']} روز\n"
             f"💰 {total:,} تومان از کیف پول کسر شد\n\n"
-            f"⏳ سرویس شما در حال آماده‌سازی است. ادمین به زودی اطلاع می‌دهد.",
+            f"⏳ ادمین به زودی سرویس را فعال می‌کند.",
             parse_mode="Markdown"
         )
-        # اطلاع به ادمین
         for admin_id in ADMIN_IDS:
             try:
                 await context.bot.send_message(
                     admin_id,
                     f"🛒 *سفارش جدید #{order_id}*\n"
-                    f"👤 کاربر: {query.from_user.first_name} | ID: `{uid}`\n"
+                    f"👤 {query.from_user.first_name} | ID: `{uid}`\n"
                     f"📦 {context.user_data['gb']} GB | {context.user_data['days']} روز\n"
-                    f"💰 {total:,} تومان (از کیف پول)\n"
-                    f"📅 {order['date']}",
+                    f"💰 {total:,} تومان (از کیف پول)\n\n"
+                    f"تأیید: /approve_{order_id}",
                     parse_mode="Markdown"
                 )
             except:
                 pass
         return MAIN_MENU
     else:
-        need = total - user["balance"]
         save_db(db)
-        context.user_data["order_pending"] = True
         await query.edit_message_text(
             f"💳 *پرداخت کارت به کارت*\n\n"
             f"💰 مبلغ: *{total:,} تومان*\n"
             f"🏦 شماره کارت:\n`{CARD_NUMBER}`\n"
             f"👤 به نام: *{CARD_OWNER}*\n\n"
-            f"پس از واریز، **تصویر رسید** را ارسال کنید:",
+            f"پس از واریز، *تصویر رسید* را ارسال کنید:",
             parse_mode="Markdown"
         )
         return BUY_RECEIPT
@@ -204,8 +198,10 @@ async def buy_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = len(db["orders"]) + 1
     order = {
         "id": order_id, "user_id": str(uid),
-        "gb": context.user_data["gb"], "days": context.user_data["days"],
-        "total": context.user_data["total"], "status": "pending_payment",
+        "gb": context.user_data.get("gb", 0),
+        "days": context.user_data.get("days", 0),
+        "total": context.user_data.get("total", 0),
+        "status": "pending_payment",
         "date": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     db["orders"].append(order)
@@ -214,14 +210,9 @@ async def buy_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_db(db)
 
     await update.message.reply_text(
-        f"✅ رسید شما دریافت شد!\n\n"
-        f"🆔 شماره سفارش: `#{order_id}`\n"
-        f"⏳ در حال بررسی توسط ادمین...",
-        parse_mode="Markdown",
-        reply_markup=main_keyboard()
+        f"✅ رسید دریافت شد!\n\n🆔 شماره سفارش: `#{order_id}`\n⏳ در حال بررسی توسط ادمین...",
+        parse_mode="Markdown", reply_markup=main_keyboard()
     )
-
-    # ارسال رسید به ادمین
     photo_id = update.message.photo[-1].file_id
     for admin_id in ADMIN_IDS:
         try:
@@ -229,10 +220,10 @@ async def buy_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 admin_id, photo_id,
                 caption=f"💳 *رسید سفارش #{order_id}*\n"
                         f"👤 {update.effective_user.first_name} | ID: `{uid}`\n"
-                        f"📦 {context.user_data['gb']} GB | {context.user_data['days']} روز\n"
-                        f"💰 {context.user_data['total']:,} تومان\n\n"
-                        f"برای تأیید: /approve_{order_id}\n"
-                        f"برای رد: /reject_{order_id}",
+                        f"📦 {order['gb']} GB | {order['days']} روز\n"
+                        f"💰 {order['total']:,} تومان\n\n"
+                        f"✅ تأیید: /approve_{order_id}\n"
+                        f"❌ رد: /reject_{order_id}",
                 parse_mode="Markdown"
             )
         except:
@@ -250,8 +241,7 @@ async def wallet_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➕ شارژ کیف پول", callback_data="wallet_charge")]
     ])
     await update.message.reply_text(
-        f"💰 *کیف پول شما*\n\n"
-        f"💵 موجودی: *{user['balance']:,} تومان*",
+        f"💰 *کیف پول شما*\n\n💵 موجودی: *{user['balance']:,} تومان*",
         parse_mode="Markdown", reply_markup=kb
     )
     return WALLET_MENU
@@ -260,9 +250,7 @@ async def wallet_charge_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        f"💳 *شارژ کیف پول*\n\n"
-        f"چه مبلغی می‌خواهید واریز کنید؟\n"
-        f"_(مثال: 50000، 100000)_ تومان",
+        f"💳 *شارژ کیف پول*\n\nچه مبلغی می‌خواهید واریز کنید؟\n_(مثال: 50000، 100000)_ تومان",
         parse_mode="Markdown"
     )
     return WALLET_AMOUNT
@@ -280,7 +268,7 @@ async def wallet_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 مبلغ: *{amount:,} تومان*\n"
         f"🏦 شماره کارت:\n`{CARD_NUMBER}`\n"
         f"👤 به نام: *{CARD_OWNER}*\n\n"
-        f"پس از واریز، **تصویر رسید** را ارسال کنید:",
+        f"پس از واریز، *تصویر رسید* را ارسال کنید:",
         parse_mode="Markdown"
     )
     return WALLET_RECEIPT
@@ -291,23 +279,19 @@ async def wallet_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WALLET_RECEIPT
 
     uid = update.effective_user.id
-    amount = context.user_data["wallet_amount"]
+    amount = context.user_data.get("wallet_amount", 0)
     db = load_db()
-    pending = {
-        "user_id": str(uid), "amount": amount,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "id": len(db["pending_wallets"]) + 1
-    }
-    db["pending_wallets"].append(pending)
+    pw_id = len(db["pending_wallets"]) + 1
+    db["pending_wallets"].append({
+        "id": pw_id, "user_id": str(uid), "amount": amount,
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+    })
     save_db(db)
 
     await update.message.reply_text(
-        f"✅ رسید شارژ کیف پول دریافت شد!\n"
-        f"💰 مبلغ: {amount:,} تومان\n"
-        f"⏳ پس از تأیید ادمین، موجودی شما افزایش می‌یابد.",
+        f"✅ رسید شارژ دریافت شد!\n💰 {amount:,} تومان\n⏳ پس از تأیید ادمین موجودی افزایش می‌یابد.",
         reply_markup=main_keyboard()
     )
-
     photo_id = update.message.photo[-1].file_id
     for admin_id in ADMIN_IDS:
         try:
@@ -316,7 +300,7 @@ async def wallet_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"💰 *درخواست شارژ کیف پول*\n"
                         f"👤 {update.effective_user.first_name} | ID: `{uid}`\n"
                         f"💵 مبلغ: {amount:,} تومان\n\n"
-                        f"برای تأیید: /addbalance_{uid}_{amount}",
+                        f"✅ تأیید: /addbalance_{uid}_{amount}",
                 parse_mode="Markdown"
             )
         except:
@@ -335,14 +319,14 @@ async def my_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
 
     orders = [o for o in db["orders"] if o["id"] in user["orders"]]
+    status_map = {
+        "pending_payment": "⏳ در انتظار تأیید پرداخت",
+        "pending_activation": "⚙️ در حال فعال‌سازی",
+        "active": "✅ فعال",
+        "rejected": "❌ رد شده"
+    }
     text = "📋 *سرویس‌های شما:*\n\n"
-    for o in orders[-5:]:  # آخرین ۵ سفارش
-        status_map = {
-            "pending_payment": "⏳ در انتظار تأیید پرداخت",
-            "pending_activation": "⚙️ در حال فعال‌سازی",
-            "active": "✅ فعال",
-            "rejected": "❌ رد شده"
-        }
+    for o in orders[-5:]:
         status = status_map.get(o["status"], o["status"])
         text += f"🆔 #{o['id']} | {o['gb']}GB | {o['days']}روز\n{status}\n📅 {o['date']}\n\n"
 
@@ -355,22 +339,15 @@ async def account_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = load_db()
     user = get_user(db, uid)
     save_db(db)
-
     await update.message.reply_text(
-        f"👤 *حساب کاربری*\n\n"
-        f"🆔 آیدی: `{uid}`\n"
-        f"💰 موجودی: {user['balance']:,} تومان\n"
-        f"📦 تعداد سفارشات: {len(user['orders'])}",
+        f"👤 *حساب کاربری*\n\n🆔 آیدی: `{uid}`\n💰 موجودی: {user['balance']:,} تومان\n📦 تعداد سفارشات: {len(user['orders'])}",
         parse_mode="Markdown"
     )
     return MAIN_MENU
 
 # ─── Support ──────────────────────────────────────────────────────────────────
 async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📞 *پشتیبانی*\n\nپیام خود را بنویسید، در اسرع وقت پاسخ داده می‌شود:",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text("📞 *پشتیبانی*\n\nپیام خود را بنویسید:", parse_mode="Markdown")
     return SUPPORT_MSG
 
 async def support_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -380,68 +357,136 @@ async def support_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 admin_id,
-                f"📞 *پیام پشتیبانی*\n"
-                f"👤 {update.effective_user.first_name} | ID: `{uid}`\n\n"
-                f"💬 {msg}\n\n"
-                f"برای پاسخ: /reply_{uid}",
+                f"📞 *پیام پشتیبانی*\n👤 {update.effective_user.first_name} | ID: `{uid}`\n\n💬 {msg}\n\nپاسخ: /reply_{uid}",
                 parse_mode="Markdown"
             )
         except:
             pass
-    await update.message.reply_text("✅ پیام شما ارسال شد. به زودی پاسخ می‌گیرید.", reply_markup=main_keyboard())
+    await update.message.reply_text("✅ پیام ارسال شد.", reply_markup=main_keyboard())
     return MAIN_MENU
 
-# ─── Admin Commands ───────────────────────────────────────────────────────────
+# ─── Admin Panel ──────────────────────────────────────────────────────────────
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if uid not in ADMIN_IDS:
         return
-    await update.message.reply_text("🔑 *پنل مدیریت*\n\nخوش آمدید!", parse_mode="Markdown", reply_markup=admin_keyboard())
+    await update.message.reply_text("🔑 *پنل مدیریت*", parse_mode="Markdown", reply_markup=admin_keyboard())
     return ADMIN_MENU
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
-        return
     db = load_db()
     total_users = len(db["users"])
     total_orders = len(db["orders"])
     pending = sum(1 for o in db["orders"] if o["status"] == "pending_payment")
     active = sum(1 for o in db["orders"] if o["status"] == "active")
-
     await update.message.reply_text(
-        f"📊 *آمار سیستم*\n\n"
-        f"👥 کل کاربران: {total_users}\n"
-        f"📦 کل سفارشات: {total_orders}\n"
-        f"⏳ در انتظار تأیید: {pending}\n"
-        f"✅ سرویس فعال: {active}",
+        f"📊 *آمار سیستم*\n\n👥 کاربران: {total_users}\n📦 سفارشات: {total_orders}\n⏳ در انتظار: {pending}\n✅ فعال: {active}",
         parse_mode="Markdown"
     )
+    return ADMIN_MENU
 
 async def admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
-        return
     db = load_db()
     if not db["users"]:
         await update.message.reply_text("هنوز کاربری ثبت نشده.")
-        return
+        return ADMIN_MENU
     text = "👥 *لیست کاربران:*\n\n"
     for uid_str, u in list(db["users"].items())[-10:]:
         text += f"🆔 `{uid_str}` | 💰 {u['balance']:,}T | 📦 {len(u['orders'])} سفارش\n"
     await update.message.reply_text(text, parse_mode="Markdown")
+    return ADMIN_MENU
+
+# ─── FIX: Admin Orders List ───────────────────────────────────────────────────
+async def admin_list_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    if not db["orders"]:
+        await update.message.reply_text("📭 هنوز سفارشی ثبت نشده.")
+        return ADMIN_MENU
+
+    status_map = {
+        "pending_payment": "⏳ انتظار پرداخت",
+        "pending_activation": "⚙️ انتظار فعال‌سازی",
+        "active": "✅ فعال",
+        "rejected": "❌ رد شده"
+    }
+    text = "📦 *آخرین ۱۰ سفارش:*\n\n"
+    for o in db["orders"][-10:]:
+        status = status_map.get(o["status"], o["status"])
+        text += (
+            f"🆔 #{o['id']} | 👤 `{o['user_id']}`\n"
+            f"📦 {o['gb']}GB | {o['days']}روز | 💰{o['total']:,}T\n"
+            f"{status} | 📅 {o['date']}\n"
+        )
+        if o["status"] == "pending_payment":
+            text += f"✅ /approve_{o['id']}  ❌ /reject_{o['id']}\n"
+        text += "\n"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+    return ADMIN_MENU
+
+# ─── FIX: Admin Charge Wallet Flow ────────────────────────────────────────────
+async def admin_charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💳 *شارژ کیف پول کاربر*\n\nآیدی عددی کاربر را وارد کنید:\n_(مثال: 123456789)_",
+        parse_mode="Markdown"
+    )
+    return ADMIN_CHARGE_USERID
+
+async def admin_charge_userid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ آیدی باید عدد باشد:")
+        return ADMIN_CHARGE_USERID
+
+    db = load_db()
+    if text not in db["users"]:
+        await update.message.reply_text(f"❌ کاربر `{text}` در سیستم نیست.\nآیدی را چک کنید:", parse_mode="Markdown")
+        return ADMIN_CHARGE_USERID
+
+    context.user_data["charge_uid"] = text
+    user = db["users"][text]
+    await update.message.reply_text(
+        f"✅ کاربر پیدا شد!\n💵 موجودی فعلی: {user['balance']:,} تومان\n\nمبلغ شارژ را وارد کنید (تومان):",
+    )
+    return ADMIN_CHARGE_AMOUNT
+
+async def admin_charge_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().replace(",", "")
+    if not text.isdigit() or int(text) <= 0:
+        await update.message.reply_text("❌ مبلغ نامعتبر است:")
+        return ADMIN_CHARGE_AMOUNT
+
+    amount = int(text)
+    target_uid = context.user_data["charge_uid"]
+    db = load_db()
+    user = get_user(db, target_uid)
+    user["balance"] += amount
+    save_db(db)
+
+    await update.message.reply_text(
+        f"✅ *شارژ موفق!*\n\n"
+        f"👤 کاربر: `{target_uid}`\n"
+        f"➕ مبلغ: {amount:,} تومان\n"
+        f"💵 موجودی جدید: {user['balance']:,} تومان",
+        parse_mode="Markdown", reply_markup=admin_keyboard()
+    )
+    try:
+        await context.bot.send_message(
+            int(target_uid),
+            f"💰 *کیف پول شارژ شد!*\n\n➕ {amount:,} تومان\n💵 موجودی: {user['balance']:,} تومان",
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+    return ADMIN_MENU
 
 async def admin_exit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
-        return
     await update.message.reply_text("✅ از پنل ادمین خارج شدید.", reply_markup=main_keyboard())
     return MAIN_MENU
 
-# /approve_ID - تأیید سفارش
+# ─── Admin Commands ───────────────────────────────────────────────────────────
 async def approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
+    if update.effective_user.id not in ADMIN_IDS:
         return
     try:
         order_id = int(update.message.text.split("_")[1])
@@ -458,10 +503,7 @@ async def approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     int(o["user_id"]),
-                    f"🎉 *سرویس شما فعال شد!*\n\n"
-                    f"🆔 سفارش #{order_id}\n"
-                    f"📦 {o['gb']} گیگابایت | {o['days']} روز\n\n"
-                    f"به زودی اطلاعات اتصال ارسال می‌شود.",
+                    f"🎉 *سرویس شما فعال شد!*\n\n🆔 سفارش #{order_id}\n📦 {o['gb']}GB | {o['days']}روز\n\nبه زودی اطلاعات ارسال می‌شود.",
                     parse_mode="Markdown"
                 )
             except:
@@ -469,10 +511,8 @@ async def approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     await update.message.reply_text(f"❌ سفارش #{order_id} پیدا نشد.")
 
-# /reject_ID - رد سفارش
 async def reject_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
+    if update.effective_user.id not in ADMIN_IDS:
         return
     try:
         order_id = int(update.message.text.split("_")[1])
@@ -487,20 +527,14 @@ async def reject_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_db(db)
             await update.message.reply_text(f"❌ سفارش #{order_id} رد شد.")
             try:
-                await context.bot.send_message(
-                    int(o["user_id"]),
-                    f"❌ متأسفانه سفارش #{order_id} تأیید نشد.\n"
-                    f"برای پیگیری با پشتیبانی تماس بگیرید.",
-                )
+                await context.bot.send_message(int(o["user_id"]), f"❌ سفارش #{order_id} تأیید نشد.\nبرای پیگیری پشتیبانی تماس بگیرید.")
             except:
                 pass
             return
     await update.message.reply_text(f"❌ سفارش #{order_id} پیدا نشد.")
 
-# /addbalance_USERID_AMOUNT - شارژ کیف پول
-async def add_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
+async def add_balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
         return
     try:
         parts = update.message.text.split("_")
@@ -514,31 +548,23 @@ async def add_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(db, target_uid)
     user["balance"] += amount
     save_db(db)
-    await update.message.reply_text(f"✅ {amount:,} تومان به کیف پول {target_uid} اضافه شد.\nموجودی جدید: {user['balance']:,} تومان")
+    await update.message.reply_text(f"✅ {amount:,} تومان به `{target_uid}` اضافه شد.\nموجودی: {user['balance']:,} تومان", parse_mode="Markdown")
     try:
-        await context.bot.send_message(
-            int(target_uid),
-            f"💰 *کیف پول شارژ شد!*\n\n"
-            f"➕ مبلغ: {amount:,} تومان\n"
-            f"💵 موجودی فعلی: {user['balance']:,} تومان",
-            parse_mode="Markdown"
-        )
+        await context.bot.send_message(int(target_uid), f"💰 *کیف پول شارژ شد!*\n\n➕ {amount:,} تومان\n💵 موجودی: {user['balance']:,} تومان", parse_mode="Markdown")
     except:
         pass
 
-# /reply_USERID - پاسخ به کاربر
 async def reply_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in ADMIN_IDS:
+    if update.effective_user.id not in ADMIN_IDS:
         return
     try:
         target_uid = int(update.message.text.split("_")[1])
         context.user_data["reply_to"] = target_uid
-        await update.message.reply_text(f"✏️ پیام خود را برای کاربر {target_uid} بنویسید:")
+        await update.message.reply_text(f"✏️ پیام خود را برای کاربر `{target_uid}` بنویسید:", parse_mode="Markdown")
     except:
         await update.message.reply_text("فرمت اشتباه. مثال: /reply_123456789")
 
-# ─── Fallback text handler ────────────────────────────────────────────────────
+# ─── Main Text Handler ────────────────────────────────────────────────────────
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
@@ -550,9 +576,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(target, f"📨 *پیام از پشتیبانی:*\n\n{text}", parse_mode="Markdown")
             await update.message.reply_text("✅ پیام ارسال شد.")
         except:
-            await update.message.reply_text("❌ کاربر ربات را بلاک کرده یا آیدی اشتباه است.")
-        return
+            await update.message.reply_text("❌ ارسال ناموفق. کاربر ربات را بلاک کرده.")
+        return ADMIN_MENU if uid in ADMIN_IDS else MAIN_MENU
 
+    # منوی کاربر
     if text == "🛒 خرید سرویس جدید":
         return await buy_start(update, context)
     elif text == "📋 سرویس‌های من":
@@ -563,48 +590,72 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await account_info(update, context)
     elif text == "📞 پشتیبانی":
         return await support_start(update, context)
-    elif text == "👥 کاربران" and uid in ADMIN_IDS:
-        return await admin_list_users(update, context)
-    elif text == "📊 آمار" and uid in ADMIN_IDS:
-        return await admin_stats(update, context)
-    elif text == "🔙 خروج از پنل ادمین" and uid in ADMIN_IDS:
-        return await admin_exit(update, context)
-    else:
-        await update.message.reply_text("لطفاً از منو استفاده کنید.", reply_markup=main_keyboard())
+
+    # منوی ادمین
+    if uid in ADMIN_IDS:
+        if text == "👥 کاربران":
+            return await admin_list_users(update, context)
+        elif text == "📦 سفارشات":
+            return await admin_list_orders(update, context)
+        elif text == "💳 شارژ کیف پول کاربر":
+            return await admin_charge_start(update, context)
+        elif text == "📊 آمار":
+            return await admin_stats(update, context)
+        elif text == "🔙 خروج از پنل ادمین":
+            return await admin_exit(update, context)
+
+    await update.message.reply_text("لطفاً از منو استفاده کنید.", reply_markup=main_keyboard())
+    return MAIN_MENU
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_panel),
+        ],
         states={
-            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
-                        CallbackQueryHandler(wallet_charge_callback, pattern="wallet_charge")],
+            MAIN_MENU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+                CallbackQueryHandler(wallet_charge_callback, pattern="wallet_charge"),
+            ],
             BUY_GB: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_gb)],
             BUY_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_duration)],
             BUY_CONFIRM: [CallbackQueryHandler(buy_confirm_callback)],
-            BUY_RECEIPT: [MessageHandler(filters.PHOTO, buy_receipt),
-                          MessageHandler(filters.TEXT, lambda u, c: u.message.reply_text("📷 لطفاً تصویر رسید ارسال کنید."))],
-            WALLET_MENU: [CallbackQueryHandler(wallet_charge_callback, pattern="wallet_charge"),
-                          MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)],
+            BUY_RECEIPT: [
+                MessageHandler(filters.PHOTO, buy_receipt),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: u.message.reply_text("📷 لطفاً تصویر رسید ارسال کنید.")),
+            ],
+            WALLET_MENU: [
+                CallbackQueryHandler(wallet_charge_callback, pattern="wallet_charge"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+            ],
             WALLET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_amount)],
-            WALLET_RECEIPT: [MessageHandler(filters.PHOTO, wallet_receipt),
-                             MessageHandler(filters.TEXT, lambda u, c: u.message.reply_text("📷 لطفاً تصویر رسید ارسال کنید."))],
+            WALLET_RECEIPT: [
+                MessageHandler(filters.PHOTO, wallet_receipt),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: u.message.reply_text("📷 لطفاً تصویر رسید ارسال کنید.")),
+            ],
             SUPPORT_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, support_msg)],
-            ADMIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)],
+            ADMIN_MENU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+            ],
+            ADMIN_CHARGE_USERID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_userid)],
+            ADMIN_CHARGE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_amount)],
         },
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_panel),
+        ],
         allow_reentry=True
     )
 
     app.add_handler(conv)
-    app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_order))
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_order))
-    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance))
+    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance_cmd))
     app.add_handler(MessageHandler(filters.Regex(r"^/reply_\d+$"), reply_user))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("🤖 Bot started...")
     app.run_polling()
