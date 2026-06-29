@@ -72,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     name = update.effective_user.first_name or "کاربر"
     await update.message.reply_text(
-        f"🔒 به فروشگاه VPN خوش آمدید، {name} عزیز!\n\n"
+        f"🔒 به فروشگاه Bat Vpn خوش آمدید، {name} عزیز!\n\n"
         "از منوی زیر گزینه مورد نظر را انتخاب کنید:",
         reply_markup=main_keyboard()
     )
