@@ -940,18 +940,17 @@ def main():
         fallbacks=[
             CommandHandler("start", start),
             CommandHandler("admin", admin_panel),
-            MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_order),
-            MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_order),
-            MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance_cmd),
         ],
         allow_reentry=True
     )
 
+    # گروه -1 یعنی این هندلرها قبل از ConversationHandler چک می‌شن
+    # و چون این کامندها مخصوص ادمین هستن، نباید منتظر state خاصی بمونن
+    app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_order), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_order), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance_cmd), group=-1)
+
     app.add_handler(conv)
-    # هندلر مستقل هم نگه می‌داریم برای زمانی که کاربر اصلاً وارد conversation نشده (state نداره)
-    app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_order))
-    app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_order))
-    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance_cmd))
 
     print("🤖 Bot started...")
     app.run_polling()
