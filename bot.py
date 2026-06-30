@@ -471,11 +471,42 @@ async def my_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "rejected": "❌ رد شده"
     }
     text = "📋 *سرویس‌های شما:*\n\n"
+    buttons = []
     for o in orders[-5:]:
         status = status_map.get(o["status"], o["status"])
         text += f"🆔 #{o['id']} | {o['gb']}GB | {o['days']}روز\n{status}\n📅 {o['date']}\n\n"
+        if o.get("config_link"):
+            buttons.append([InlineKeyboardButton(
+                f"🔗 لینک سفارش #{o['id']}", callback_data=f"view_link_{o['id']}"
+            )])
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    kb = InlineKeyboardMarkup(buttons) if buttons else None
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    return MAIN_MENU
+
+async def view_link_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش لینک کانفیگ ذخیره‌شده برای یک سفارش به کاربر"""
+    query = update.callback_query
+    await query.answer()
+    order_id = int(query.data.split("_")[-1])
+    uid = query.from_user.id
+
+    db = load_db()
+    order = next((o for o in db["orders"] if o["id"] == order_id), None)
+
+    if not order or order["user_id"] != str(uid):
+        await query.answer("❌ این سفارش متعلق به شما نیست.", show_alert=True)
+        return MAIN_MENU
+
+    link = order.get("config_link")
+    if not link:
+        await query.answer("❌ هنوز لینکی برای این سفارش ثبت نشده.", show_alert=True)
+        return MAIN_MENU
+
+    await query.message.reply_text(
+        f"🔗 *اطلاعات اتصال سفارش #{order_id}*\n\n{link}",
+        parse_mode="Markdown"
+    )
     return MAIN_MENU
 
 # ─── Account ──────────────────────────────────────────────────────────────────
@@ -785,6 +816,46 @@ async def add_balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     return ADMIN_MENU
 
+async def setlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /setlink_5 سپس متن لینک در همان پیام یا پیام بعدی -> اینجا فرمت: /setlink_5 سپس فاصله و خود لینک"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    import re
+    m = re.match(r"^/setlink_?(\d+)(?:\s+([\s\S]+))?$", update.message.text.strip())
+    if not m:
+        await update.message.reply_text("فرمت: /setlink_5 سپس لینک را همان خط بفرستید\nمثال: /setlink_5 vless://abc123...")
+        return
+    order_id = int(m.group(1))
+    link_text = m.group(2)
+
+    db = load_db()
+    order = next((o for o in db["orders"] if o["id"] == order_id), None)
+    if not order:
+        await update.message.reply_text(f"❌ سفارش #{order_id} پیدا نشد.")
+        return
+
+    if not link_text:
+        # اگه لینک رو توی همون پیام نفرستاده، بپرس
+        context.user_data["send_link_order_id"] = order_id
+        context.user_data["send_link_uid"] = order["user_id"]
+        await update.message.reply_text(
+            f"🔗 لینک سفارش #{order_id} را در پیام بعدی بفرستید:",
+            reply_markup=admin_cancel_kb()
+        )
+        return ADMIN_REPLY_MSG
+
+    order["config_link"] = link_text
+    save_db(db)
+    await update.message.reply_text(f"✅ لینک سفارش #{order_id} ثبت/آپدیت شد.")
+    try:
+        await context.bot.send_message(
+            int(order["user_id"]),
+            f"🔗 *اطلاعات اتصال سفارش #{order_id} به‌روزرسانی شد*\n\n{link_text}",
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+
 # ─── Send Link to Buyer Flow ──────────────────────────────────────────────────
 async def send_link_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -810,15 +881,26 @@ async def send_link_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = context.user_data.get("send_link_order_id")
     text = update.message.text
 
+    # ذخیره لینک توی سفارش تا کاربر بعداً بتونه از "سرویس‌های من" ببیندش
+    db = load_db()
+    for o in db["orders"]:
+        if o["id"] == order_id:
+            o["config_link"] = text
+            break
+    save_db(db)
+
     try:
         await context.bot.send_message(
             int(target_uid),
             f"🔗 *اطلاعات اتصال سفارش #{order_id}*\n\n{text}",
             parse_mode="Markdown"
         )
-        await update.message.reply_text("✅ لینک ارسال شد.", reply_markup=admin_keyboard())
+        await update.message.reply_text(
+            "✅ لینک ارسال شد و ذخیره شد. کاربر می‌تواند از «سرویس‌های من» دوباره ببیندش.",
+            reply_markup=admin_keyboard()
+        )
     except:
-        await update.message.reply_text("❌ ارسال ناموفق. کاربر ربات را بلاک کرده.", reply_markup=admin_keyboard())
+        await update.message.reply_text("❌ ارسال ناموفق. کاربر ربات را بلاک کرده. (لینک ذخیره شد)", reply_markup=admin_keyboard())
 
     context.user_data.pop("send_link_uid", None)
     context.user_data.pop("send_link_order_id", None)
@@ -879,6 +961,7 @@ def main():
                 CallbackQueryHandler(wallet_charge_callback, pattern="^wallet_charge$"),
                 CallbackQueryHandler(go_main_callback, pattern="^go_main$"),
                 CallbackQueryHandler(pay_pending_from_wallet_callback, pattern="^pay_pending_from_wallet$"),
+                CallbackQueryHandler(view_link_callback, pattern="^view_link_"),
             ],
             BUY_GB: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, buy_gb),
@@ -950,6 +1033,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_?\d+$"), approve_order), group=-1)
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_?\d+$"), reject_order), group=-1)
     app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_?\d+_\d+$"), add_balance_cmd), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/setlink_?\d+"), setlink_cmd), group=-1)
 
     app.add_handler(conv)
 
