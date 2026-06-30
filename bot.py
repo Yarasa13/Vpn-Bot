@@ -710,11 +710,12 @@ async def admin_exit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
-    try:
-        order_id = int(update.message.text.split("_")[1])
-    except:
+    import re
+    m = re.match(r"^/approve_?(\d+)$", update.message.text.strip())
+    if not m:
         await update.message.reply_text("فرمت اشتباه. مثال: /approve_5")
         return ADMIN_MENU
+    order_id = int(m.group(1))
     db = load_db()
     for o in db["orders"]:
         if o["id"] == order_id:
@@ -743,11 +744,12 @@ async def approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reject_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
-    try:
-        order_id = int(update.message.text.split("_")[1])
-    except:
+    import re
+    m = re.match(r"^/reject_?(\d+)$", update.message.text.strip())
+    if not m:
         await update.message.reply_text("فرمت اشتباه. مثال: /reject_5")
         return ADMIN_MENU
+    order_id = int(m.group(1))
     db = load_db()
     for o in db["orders"]:
         if o["id"] == order_id:
@@ -765,13 +767,13 @@ async def reject_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
-    try:
-        parts = update.message.text.split("_")
-        target_uid = parts[1]
-        amount = int(parts[2])
-    except:
+    import re
+    m = re.match(r"^/addbalance_?(\d+)_(\d+)$", update.message.text.strip())
+    if not m:
         await update.message.reply_text("فرمت اشتباه. مثال: /addbalance_123456_50000")
         return ADMIN_MENU
+    target_uid = m.group(1)
+    amount = int(m.group(2))
     db = load_db()
     user = get_user(db, target_uid)
     user["balance"] += amount
@@ -945,10 +947,9 @@ def main():
     )
 
     # گروه -1 یعنی این هندلرها قبل از ConversationHandler چک می‌شن
-    # و چون این کامندها مخصوص ادمین هستن، نباید منتظر state خاصی بمونن
-    app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_order), group=-1)
-    app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_order), group=-1)
-    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_\d+_\d+$"), add_balance_cmd), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/approve_?\d+$"), approve_order), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/reject_?\d+$"), reject_order), group=-1)
+    app.add_handler(MessageHandler(filters.Regex(r"^/addbalance_?\d+_\d+$"), add_balance_cmd), group=-1)
 
     app.add_handler(conv)
 
