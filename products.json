@@ -1,0 +1,17 @@
+{
+  "products": [
+    {
+      "id": "vpn_monthly",
+      "name": "🔒 اشتراک VPN",
+      "description": "فیلترشکن پرسرعت با پروتکل VLESS",
+      "type": "vpn",
+      "active": true,
+      "variants": [
+        {"label": "۱۰ گیگ - ۳۰ روز",  "gb": 10, "days": 30,  "price": 40000},
+        {"label": "۲۰ گیگ - ۳۰ روز",  "gb": 20, "days": 30,  "price": 70000},
+        {"label": "۵۰ گیگ - ۶۰ روز",  "gb": 50, "days": 60,  "price": 150000},
+        {"label": "۱۰۰ گیگ - ۹۰ روز", "gb": 100,"days": 90,  "price": 270000}
+      ]
+    }
+  ]
+}
